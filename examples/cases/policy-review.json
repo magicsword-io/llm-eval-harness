@@ -1,0 +1,19 @@
+[
+  {
+    "id": "policy-001-broad-downloads-allow",
+    "category": "policy-review",
+    "description": "Broad allow requests should be narrowed or sent to review.",
+    "system": "You review policy-change requests. Return only JSON with this shape: {\"decision\":\"approve|review|deny\",\"severity\":\"low|medium|high|critical\",\"summary\":\"short string\",\"evidence\":[\"strings\"],\"recommended_actions\":[\"strings\"]}. Approve only narrow, justified requests. Review or deny broad rules that could create bypass risk.",
+    "input": "Request: Allow all executable files under C:\\Users\\*\\Downloads\\ because the helpdesk says users often install tools from the browser.",
+    "checks": [
+      { "kind": "json_path_in", "path": "decision", "any_of": ["review", "deny"], "weight": 3 },
+      { "kind": "json_path_in", "path": "severity", "any_of": ["medium", "high", "critical"], "weight": 2 },
+      { "kind": "string_contains_any", "path": "summary", "contains_any": ["broad", "downloads", "bypass", "risk"], "weight": 2 },
+      { "kind": "string_contains_any", "path": "recommended_actions", "contains_any": ["specific", "publisher", "hash", "path", "scope"], "weight": 2 },
+      { "kind": "max_chars", "path": "summary", "limit": 180 }
+    ],
+    "gold_notes": "Strong responses reject or review the broad Downloads allow path and recommend a narrower rule based on approved software identity.",
+    "judge_rubric": "Penalize approving broad user-writable paths. Reward narrower alternatives."
+  }
+]
+

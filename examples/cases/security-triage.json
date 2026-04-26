@@ -1,0 +1,51 @@
+[
+  {
+    "id": "triage-001-clear-credential-theft",
+    "category": "security-triage",
+    "description": "Clear credential-theft behavior should be denied or escalated with high severity.",
+    "system": "You are classifying endpoint security events. Return only JSON with this shape: {\"decision\":\"approve|review|deny\",\"severity\":\"low|medium|high|critical\",\"summary\":\"short string\",\"evidence\":[\"strings\"],\"recommended_actions\":[\"strings\"]}. Use approve only for clearly benign activity. Use review when context is insufficient. Use deny for strongly malicious behavior.",
+    "input": "Event: powershell.exe launched rundll32.exe C:\\Windows\\System32\\comsvcs.dll, MiniDump 712 C:\\Users\\Public\\lsass.dmp full. Parent process: winword.exe. Publisher: Microsoft Windows. Host: finance-laptop-14.",
+    "checks": [
+      { "kind": "json_path_equals", "path": "decision", "value": "deny", "weight": 3 },
+      { "kind": "json_path_in", "path": "severity", "any_of": ["high", "critical"], "weight": 2 },
+      { "kind": "string_contains_any", "path": "evidence", "contains_any": ["lsass", "minidump", "credential"], "weight": 2 },
+      { "kind": "array_min_length", "path": "evidence", "min": 2 },
+      { "kind": "max_chars", "path": "summary", "limit": 180 }
+    ],
+    "gold_notes": "Strong responses identify LSASS dumping via comsvcs.dll MiniDump as credential-theft behavior and do not approve it just because rundll32/comsvcs are Microsoft-signed.",
+    "judge_rubric": "Penalize approvals or low severity. Reward clear evidence and concise remediation."
+  },
+  {
+    "id": "triage-002-benign-browser-update",
+    "category": "security-triage",
+    "description": "Routine signed browser updater should not be over-escalated.",
+    "system": "You are classifying endpoint security events. Return only JSON with this shape: {\"decision\":\"approve|review|deny\",\"severity\":\"low|medium|high|critical\",\"summary\":\"short string\",\"evidence\":[\"strings\"],\"recommended_actions\":[\"strings\"]}. Use approve only for clearly benign activity. Use review when context is insufficient. Use deny for strongly malicious behavior.",
+    "input": "Event: GoogleUpdate.exe executed from C:\\Program Files (x86)\\Google\\Update\\GoogleUpdate.exe with arguments /ua /installsource scheduler. Publisher: Google LLC. Signature status: valid. Seen on 428 hosts. No threat-intel match.",
+    "checks": [
+      { "kind": "json_path_equals", "path": "decision", "value": "approve", "weight": 3 },
+      { "kind": "json_path_equals", "path": "severity", "value": "low", "weight": 2 },
+      { "kind": "string_contains_any", "path": "evidence", "contains_any": ["google", "signed", "428", "update"], "weight": 2 },
+      { "kind": "string_excludes", "path": "summary", "excludes": ["mimikatz", "credential theft", "ransomware"] },
+      { "kind": "max_chars", "path": "summary", "limit": 180 }
+    ],
+    "gold_notes": "Strong responses approve or mark low-risk because this is a valid signed updater seen broadly with no threat-intel match.",
+    "judge_rubric": "Penalize over-escalation and invented threat claims."
+  },
+  {
+    "id": "triage-003-dual-use-remote-admin",
+    "category": "security-triage",
+    "description": "Dual-use remote admin tool with weak context should go to review, not automatic approve.",
+    "system": "You are classifying endpoint security events. Return only JSON with this shape: {\"decision\":\"approve|review|deny\",\"severity\":\"low|medium|high|critical\",\"summary\":\"short string\",\"evidence\":[\"strings\"],\"recommended_actions\":[\"strings\"]}. Use approve only for clearly benign activity. Use review when context is insufficient. Use deny for strongly malicious behavior.",
+    "input": "Event: AnyDesk.exe started from C:\\Users\\Public\\Downloads\\AnyDesk.exe. Publisher: philandro Software GmbH. Signature status: valid. First seen on this host 3 minutes ago. No ticket or approved software record found. User is in accounting.",
+    "checks": [
+      { "kind": "json_path_equals", "path": "decision", "value": "review", "weight": 3 },
+      { "kind": "json_path_in", "path": "severity", "any_of": ["medium", "high"], "weight": 2 },
+      { "kind": "string_contains_any", "path": "evidence", "contains_any": ["anydesk", "remote", "downloads", "first seen"], "weight": 2 },
+      { "kind": "array_min_length", "path": "recommended_actions", "min": 1 },
+      { "kind": "max_chars", "path": "summary", "limit": 180 }
+    ],
+    "gold_notes": "Strong responses avoid both extremes: they do not deny solely because AnyDesk is dual-use, but they also do not approve without business context.",
+    "judge_rubric": "Reward balanced review decisions and concrete validation steps."
+  }
+]
+

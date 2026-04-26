@@ -1,14 +1,14 @@
-# How We Test LLMs Before Letting Them Make Security Decisions
+# How We Test LLMs Before Letting Them Into Production Workflows
 
-Picking an LLM for a production security product is not the same as picking a model for a demo.
+Picking an LLM for a production feature is not the same as picking a model for a demo.
 
 In a demo, the answer can be impressive if it sounds right. In production, sounding right is not enough. The model has to follow the output contract, make the right decision, avoid inventing evidence, stay within cost limits, and return quickly enough that users are not waiting on it.
 
-We recently built a repeatable model evaluation workflow for MagicSword, our endpoint security platform. The goal was simple: stop choosing models by vibe and start choosing them with evidence.
+We recently built a repeatable model evaluation workflow for a security-focused product. The goal was simple: stop choosing models by vibe and start choosing them with evidence.
 
 ## The Problem With Ad Hoc Model Testing
 
-The normal workflow for testing models looks something like this:
+The common workflow for testing models looks like this:
 
 1. Paste a production prompt into a few models.
 2. Read the answers.
@@ -16,20 +16,20 @@ The normal workflow for testing models looks something like this:
 
 That can be useful for a first impression, but it breaks down quickly.
 
-Security workflows have edge cases. A model may correctly flag obvious malware but mishandle a signed binary with threat-intel context. Another model may produce a polished answer but invent a MITRE technique. Another may choose the right action but return malformed JSON that the product cannot parse.
+Production workflows have edge cases. A model may correctly handle an obvious case but fail when the evidence is ambiguous. Another model may produce a polished answer but invent facts. Another may choose the right action but return malformed JSON that the app cannot parse.
 
-We needed a test harness that could answer more practical questions:
+We needed a harness that could answer practical questions:
 
 - Does the model follow our schema every time?
 - Does it choose the right action on hard cases?
-- Does it hallucinate facts, techniques, or rule syntax?
+- Does it hallucinate facts, techniques, or evidence?
 - How much does it cost per case?
 - How fast is it?
 - What happens when the provider fails?
 
 ## The Eval Structure
 
-Our eval suite runs the same test cases across multiple candidate models through OpenRouter. Each test case represents a workflow we care about, such as alert triage, analytics classification, threat hunting, policy rule generation, or security summary enrichment.
+The eval suite runs the same test cases across multiple candidate models through OpenRouter. Each test case represents a workflow we care about, such as classification, policy review, incident summarization, support triage, or enrichment.
 
 Each candidate model receives the same system prompt and user input. The runner records:
 
@@ -49,20 +49,20 @@ The first scoring layer is pure code.
 
 For every case where we expect structured output, we define checks that can be evaluated deterministically:
 
-- The decision must equal `deny`, `review`, `approve`, or another allowed enum.
+- The decision must equal an expected enum.
 - Required evidence must be present.
 - Certain fields must stay under length limits.
 - The model must not name facts that were not in the prompt.
-- Policy rules must not become overly broad.
-- Required technique IDs or risk levels must match the case.
+- Risk levels must match the case.
+- Broad or unsafe recommendations must not be approved.
 
-This layer is cheap and repeatable. It catches the failures that do not require judgment.
+This layer is cheap and repeatable. It catches failures that do not require judgment.
 
-For example, if a prompt asks the model to select from five threat-intel entries and the model invents a sixth, no judge is needed. That is a deterministic failure.
+If a prompt gives the model five facts and the model invents a sixth, no judge is needed. That is a deterministic failure.
 
 ## Layer 2: LLM-as-Judge
 
-Some failures are harder to capture with code. Security analysis has nuance: context matters, evidence quality matters, and two answers can both be parseable while one is much safer.
+Some failures are harder to capture with code. Analysis has nuance: context matters, evidence quality matters, and two answers can both be parseable while one is much safer.
 
 For those cases, we use a judge model.
 
@@ -84,7 +84,7 @@ It then grades each model on:
 
 The judge also picks the best response for that case and lists hallucinations or cross-model patterns.
 
-We do not treat the judge as perfect. It is another model with its own bias. But it is extremely useful when paired with deterministic checks and human review.
+We do not treat the judge as perfect. It is another model with its own bias. But it is useful when paired with deterministic checks and human review.
 
 ## Accuracy First, Then Cost, Then Speed
 
@@ -96,9 +96,9 @@ Our ranking priority is:
 
 That order matters.
 
-For a security workflow, a very cheap model that makes unsafe decisions is not cheap. It creates downstream review cost, false positives, false negatives, and user trust problems.
+For a workflow that users rely on, a cheap model that makes unsafe decisions is not cheap. It creates downstream review cost, false positives, false negatives, and trust problems.
 
-But once two models are close enough on accuracy, cost matters a lot. A model that is 1% better but 20x more expensive is not automatically the right default. It may be better as a fallback for hard cases rather than the primary production model.
+But once two models are close enough on accuracy, cost matters a lot. A model that is slightly better but 20x more expensive is not automatically the right default. It may be better as a fallback for hard cases rather than the primary model.
 
 Speed comes third. Fast is valuable, especially for inline workflows, but not at the expense of correctness.
 
@@ -117,13 +117,13 @@ Each run writes a report with:
 - API errors
 - Per-case verdicts
 
-This changed the model-selection conversation. Instead of asking “which answer do we like?”, we can ask:
+This changes the model-selection conversation. Instead of asking “which answer do we like?”, we can ask:
 
 - Which model is most accurate on the cases that matter?
 - Which one is the best production default?
 - Which one should be the fallback?
 - Which failures are provider reliability problems versus model-quality problems?
-- Is the expensive model actually buying us enough quality?
+- Is the expensive model actually buying enough quality?
 
 ## A Practical Lesson: Judge Cost Can Dominate
 
@@ -137,13 +137,13 @@ Our practical approach:
 - Use small smoke runs when testing a new judge.
 - Run the full judged suite only against finalists.
 - Compare at least two judges before making a high-stakes switch.
-- Save the raw JSON report so another paid tool or local reviewer can inspect the result without rerunning the candidates.
+- Save the raw JSON report so another reviewer can inspect the result without rerunning the candidates.
 
 That last point matters. If you already pay for a separate coding assistant or analysis tool, you can generate the raw report once and have that tool review the report offline instead of paying an expensive judge for every iteration.
 
-## Why We May Open Source It
+## Why Open Source The Harness
 
-The exact prompts and cases for our production system are specific to MagicSword. But the pattern is broadly useful:
+The exact prompts and cases for any production system are specific to that product. But the pattern is broadly useful:
 
 - Test real workflows, not generic benchmarks.
 - Use deterministic checks wherever possible.
@@ -152,11 +152,7 @@ The exact prompts and cases for our production system are specific to MagicSword
 - Treat provider failures and parse failures as model-selection data.
 - Make the recommendation explainable.
 
-Open sourcing the harness would let other teams adapt the same pattern to their own domains: security, legal review, support triage, sales ops, compliance, internal agents, or any workflow where correctness matters.
-
-## What We Would Open Source
-
-The public version should include:
+The public harness includes:
 
 - A CLI runner
 - Example test cases
@@ -166,7 +162,7 @@ The public version should include:
 - Cost and latency rollups
 - A recommendation heuristic based on accuracy, price, and speed
 
-It should not include customer data, proprietary threat intelligence, private production prompts, or raw internal reports.
+It should not include customer data, proprietary prompts, private intelligence, raw internal reports, or secrets.
 
 ## Final Thought
 

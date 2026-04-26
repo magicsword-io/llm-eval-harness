@@ -1,0 +1,23 @@
+{
+  "name": "llm-eval-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Runnable OpenRouter-based LLM evaluation harness with deterministic checks, optional judge scoring, cost, and latency reporting.",
+  "scripts": {
+    "eval": "tsx src/run.ts",
+    "smoke": "tsx src/run.ts --model google/gemini-3.1-flash-lite-preview --model x-ai/grok-4.1-fast --limit 2 --out reports/smoke.md --json reports/smoke.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  }
+}
