@@ -4,6 +4,10 @@ A runnable OpenRouter-based evaluation harness for comparing LLMs on your own pr
 
 It runs the same test cases across multiple candidate models, scores objective requirements with deterministic checks, optionally asks a judge model to compare responses, and writes Markdown/JSON reports with cost and latency.
 
+## Workflow
+
+![LLM eval workflow](docs/workflow.png)
+
 ## Why Use This
 
 Generic benchmarks rarely match production behavior. Real applications care about things like:
