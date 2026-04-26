@@ -90,6 +90,8 @@ Generated reports include:
 - JSON parse failures
 - Per-case details
 
+The CLI also prints the recommended model and short reason at the end of each run.
+
 ## CLI Flags
 
 | Flag | Purpose |
@@ -189,4 +191,3 @@ When `checks` are present, the runner requests OpenRouter JSON mode. Put the wor
 - Judge calls can dominate cost because every candidate response is sent back to the judge.
 - Provider errors count as eval data. A high-quality model that fails often may still be a poor production default.
 - The included cases are examples only. Replace them with cases that reflect your product.
-

@@ -5,7 +5,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chat, ChatError, estimateCost, getModelPricing, loadLivePricing, parseJsonLoose } from './openrouter.js';
 import { judgeCase } from './judge.js';
-import { renderMarkdown } from './report.js';
+import { getRecommendation, renderMarkdown } from './report.js';
 import { scoreCase } from './score.js';
 import type { CaseResult, EvalCase, ModelOutput, ModelUsage, RunReport } from './types.js';
 
@@ -285,6 +285,12 @@ async function main(): Promise<void> {
   };
 
   aggregateJudge(report);
+
+  const recommendation = getRecommendation(report);
+  if (recommendation) {
+    console.log(`\nRecommended model: ${recommendation.winner.model}`);
+    console.log(`Why: ${recommendation.reason}`);
+  }
 
   const markdown = renderMarkdown(report);
   await mkdir(path.dirname(args.out), { recursive: true });

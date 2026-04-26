@@ -48,17 +48,22 @@ interface RankedModel {
 }
 
 export function getRecommendation(report: RunReport): { winner: RankedModel; ranked: RankedModel[]; reason: string } | null {
-  const ranked = report.models.map((model): RankedModel => {
-    const judgeAvg = report.judge_per_model_avg?.[model];
-    return {
-      model,
-      accuracy: judgeAvg?.accuracy ?? deterministicOverall(report, model) * 10,
-      deterministic: deterministicOverall(report, model),
-      costPerCase: costPerCase(report, model),
-      avgLatencyMs: avgLatency(report, model),
-      safety: judgeAvg?.safety ?? 0
-    };
-  });
+  const ranked = report.models
+    .filter((model) => {
+      const usage = report.per_model_usage[model];
+      return report.total_cases - usage.api_errors - usage.parse_failures > 0;
+    })
+    .map((model): RankedModel => {
+      const judgeAvg = report.judge_per_model_avg?.[model];
+      return {
+        model,
+        accuracy: judgeAvg?.accuracy ?? deterministicOverall(report, model) * 10,
+        deterministic: deterministicOverall(report, model),
+        costPerCase: costPerCase(report, model),
+        avgLatencyMs: avgLatency(report, model),
+        safety: judgeAvg?.safety ?? 0
+      };
+    });
 
   if (ranked.length === 0) return null;
 
@@ -176,4 +181,3 @@ export function renderMarkdown(report: RunReport): string {
 
   return `${lines.join('\n')}\n`;
 }
-
