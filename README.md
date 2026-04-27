@@ -162,6 +162,8 @@ If no judge is used, deterministic score is used as the accuracy signal.
 
 Cases live in `examples/cases/*.json`. Each file can contain one case or an array of cases.
 
+For a full guide, see [docs/writing-cases.md](docs/writing-cases.md).
+
 ```json
 {
   "id": "triage-001-clear-credential-theft",
