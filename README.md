@@ -96,6 +96,8 @@ Generated reports include:
 
 The CLI also prints the recommended model and short reason at the end of each run.
 
+Before the run starts, a preflight step verifies every `--model` and `--judge` id against the live OpenRouter catalog and probes each one with a 1-token request. Unknown ids and unreachable models (including provider data-policy blocks) abort the run immediately instead of polluting the report. Use `--skip-preflight` to bypass.
+
 ## CLI Flags
 
 | Flag | Purpose |
@@ -109,6 +111,7 @@ The CLI also prints the recommended model and short reason at the end of each ru
 | `--timeout-seconds <n>` | Candidate timeout. Default: 60. |
 | `--judge-timeout-seconds <n>` | Judge timeout. Default: 120. |
 | `--sequential` | Run candidate models one at a time. Default is parallel per case. |
+| `--skip-preflight` | Skip the pre-run model availability check. |
 | `--out <path>` | Markdown report path. Default: `reports/report.md`. |
 | `--json <path>` | Optional raw JSON report path. |
 

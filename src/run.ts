@@ -3,7 +3,7 @@
 import 'dotenv/config';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { chat, ChatError, estimateCost, getModelPricing, loadLivePricing, parseJsonLoose } from './openrouter.js';
+import { chat, ChatError, estimateCost, getLiveModelIds, getModelPricing, loadLivePricing, parseJsonLoose } from './openrouter.js';
 import { judgeCase } from './judge.js';
 import { getRecommendation, renderMarkdown } from './report.js';
 import { scoreCase } from './score.js';
@@ -19,6 +19,7 @@ interface CliArgs {
   timeoutMs: number;
   judgeTimeoutMs: number;
   sequential: boolean;
+  skipPreflight: boolean;
   out: string;
   json?: string;
 }
@@ -37,6 +38,7 @@ Options:
   --timeout-seconds <n>        Candidate timeout. Default: 60.
   --judge-timeout-seconds <n>  Judge timeout. Default: 120.
   --sequential                 Run candidate models one at a time.
+  --skip-preflight             Skip the model availability check before the run.
   --out <path>                 Markdown report path. Default: reports/report.md
   --json <path>                Optional raw JSON report path.
 `);
@@ -50,6 +52,7 @@ function parseArgs(argv: string[]): CliArgs {
     timeoutMs: 60_000,
     judgeTimeoutMs: 120_000,
     sequential: false,
+    skipPreflight: false,
     out: 'reports/report.md'
   };
 
@@ -70,6 +73,7 @@ function parseArgs(argv: string[]): CliArgs {
     else if (arg === '--timeout-seconds') args.timeoutMs = Number(next()) * 1000;
     else if (arg === '--judge-timeout-seconds') args.judgeTimeoutMs = Number(next()) * 1000;
     else if (arg === '--sequential') args.sequential = true;
+    else if (arg === '--skip-preflight') args.skipPreflight = true;
     else if (arg === '--out') args.out = next();
     else if (arg === '--json') args.json = next();
     else if (arg === '--help' || arg === '-h') usage();
@@ -108,8 +112,47 @@ async function loadCases(casesDir: string): Promise<EvalCase[]> {
   return cases;
 }
 
-function emptyUsage(): ModelUsage {
-  return {
+async function preflight(models: string[]): Promise<void> {
+  const catalog = getLiveModelIds();
+  if (catalog) {
+    const unknown = models.filter((model) => !catalog.has(model));
+    if (unknown.length > 0) {
+      console.error(`\n[preflight] unknown model id(s) — not in the live OpenRouter catalog:`);
+      for (const model of unknown) console.error(`  - ${model}`);
+      console.error(`Fix the id or rerun with --skip-preflight.`);
+      process.exit(1);
+    }
+  }
+
+  process.stdout.write(`[preflight] probing ${models.length} model(s)... `);
+  const probes = await Promise.all(
+    models.map(async (model) => {
+      try {
+        await chat({ model, system: 'Reply with the word ok.', user: 'ping', maxTokens: 1, timeoutMs: 20_000 });
+        return { model, error: null as string | null };
+      } catch (error) {
+        return { model, error: (error as Error).message };
+      }
+    })
+  );
+
+  const failed = probes.filter((probe) => probe.error);
+  if (failed.length === 0) {
+    console.log('all reachable');
+    return;
+  }
+
+  console.log('failed\n');
+  for (const probe of failed) console.error(`  - ${probe.model}: ${probe.error}`);
+  if (failed.some((probe) => probe.error?.includes('guardrail restrictions and data policy'))) {
+    console.error(`\nSome failures are OpenRouter data-policy blocks, not bad models.`);
+    console.error(`Allow those providers at https://openrouter.ai/settings/privacy and retry.`);
+  }
+  console.error(`\nFix the failing model(s), drop them, or rerun with --skip-preflight.`);
+  process.exit(1);
+}
+
+function emptyUsage(): ModelUsage {  return {
     input_tokens: 0,
     output_tokens: 0,
     estimated_cost_usd: 0,
@@ -239,6 +282,10 @@ async function main(): Promise<void> {
   const judgeCalls = args.judge ? cases.length : 0;
   console.log(`Running ${cases.length} cases x ${args.models.length} models${args.judge ? ` with judge ${args.judge}` : ''}`);
   console.log(`Planned API calls: ${candidateCalls} candidates + ${judgeCalls} judge = ${candidateCalls + judgeCalls}`);
+
+  if (!args.skipPreflight) {
+    await preflight([...args.models, ...(args.judge ? [args.judge] : [])]);
+  }
 
   const startedAt = new Date().toISOString();
   const usage: Record<string, ModelUsage> = Object.fromEntries(args.models.map((model) => [model, emptyUsage()]));

@@ -154,6 +154,10 @@ export async function loadLivePricing(): Promise<{ count: number; error?: string
   }
 }
 
+export function getLiveModelIds(): Set<string> | null {
+  return livePricing && livePricing.size > 0 ? new Set(livePricing.keys()) : null;
+}
+
 export function getModelPricing(model: string): { input: number; output: number; source: 'live' | 'fallback' } | null {
   if (livePricing?.has(model)) return livePricing.get(model)!;
   const fallback = FALLBACK_PRICING[model];
