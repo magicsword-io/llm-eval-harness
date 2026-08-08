@@ -155,6 +155,7 @@ export interface ModelOutput {
   output_tokens: number;
   estimated_cost_usd: number;
   error?: string;
+  error_kind?: 'data_policy' | 'timeout' | 'api';
 }
 
 export interface DeterministicScore {
@@ -204,6 +205,7 @@ export interface ModelUsage {
   total_latency_ms: number;
   parse_failures: number;
   api_errors: number;
+  data_policy_blocks: number;
 }
 
 export interface RunReport {

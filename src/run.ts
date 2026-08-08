@@ -129,9 +129,13 @@ async function preflight(models: string[]): Promise<void> {
     models.map(async (model) => {
       try {
         await chat({ model, system: 'Reply with the word ok.', user: 'ping', maxTokens: 1, timeoutMs: 20_000 });
-        return { model, error: null as string | null };
+        return { model, error: null as string | null, kind: null as string | null };
       } catch (error) {
-        return { model, error: (error as Error).message };
+        return {
+          model,
+          error: (error as Error).message,
+          kind: error instanceof ChatError ? error.kind : 'api'
+        };
       }
     })
   );
@@ -144,7 +148,7 @@ async function preflight(models: string[]): Promise<void> {
 
   console.log('failed\n');
   for (const probe of failed) console.error(`  - ${probe.model}: ${probe.error}`);
-  if (failed.some((probe) => probe.error?.includes('guardrail restrictions and data policy'))) {
+  if (failed.some((probe) => probe.kind === 'data_policy')) {
     console.error(`\nSome failures are OpenRouter data-policy blocks, not bad models.`);
     console.error(`Allow those providers at https://openrouter.ai/settings/privacy and retry.`);
   }
@@ -158,7 +162,8 @@ function emptyUsage(): ModelUsage {  return {
     estimated_cost_usd: 0,
     total_latency_ms: 0,
     parse_failures: 0,
-    api_errors: 0
+    api_errors: 0,
+    data_policy_blocks: 0
   };
 }
 
@@ -199,7 +204,8 @@ async function runModel(model: string, evalCase: EvalCase, timeoutMs: number): P
       input_tokens: 0,
       output_tokens: 0,
       estimated_cost_usd: 0,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
+      error_kind: error instanceof ChatError ? error.kind : 'api'
     };
   }
 }
@@ -209,8 +215,10 @@ function applyUsage(usage: ModelUsage, output: ModelOutput): void {
   usage.output_tokens += output.output_tokens;
   usage.estimated_cost_usd += output.estimated_cost_usd;
   usage.total_latency_ms += output.latency_ms;
-  if (output.error) usage.api_errors += 1;
-  else if (!output.parse_ok) usage.parse_failures += 1;
+  if (output.error) {
+    usage.api_errors += 1;
+    if (output.error_kind === 'data_policy') usage.data_policy_blocks += 1;
+  } else if (!output.parse_ok) usage.parse_failures += 1;
 }
 
 function aggregateJudge(report: RunReport): void {
@@ -347,6 +355,13 @@ async function main(): Promise<void> {
   };
 
   aggregateJudge(report);
+
+  const policyBlocked = args.models.filter((model) => (usage[model]?.data_policy_blocks ?? 0) > 0);
+  if (policyBlocked.length > 0) {
+    console.log(`\nWARNING: ${policyBlocked.length} model(s) had requests blocked by your OpenRouter data policy:`);
+    for (const model of policyBlocked) console.log(`  - ${model} (${usage[model].data_policy_blocks} blocked)`);
+    console.log(`Their scores are not meaningful. Allow providers at https://openrouter.ai/settings/privacy and rerun.`);
+  }
 
   const recommendation = getRecommendation(report);
   if (recommendation) {
