@@ -90,7 +90,7 @@ Candidate responses:
 ${candidateBlocks.join('\n\n')}`;
 
   try {
-    const response = await chat({
+    let response = await chat({
       model: judgeModel,
       system: JUDGE_SYSTEM,
       user,
@@ -99,9 +99,30 @@ ${candidateBlocks.join('\n\n')}`;
       timeoutMs
     });
 
-    const parsed = parseJsonLoose(response.content);
+    let parsed = parseJsonLoose(response.content);
+    if (!parsed.ok) {
+      // Some reasoning models intermittently return empty or non-JSON content
+      // under response_format=json_object. Retry once without JSON mode.
+      const retry = await chat({
+        model: judgeModel,
+        system: JUDGE_SYSTEM,
+        user,
+        jsonMode: false,
+        maxTokens: 8000,
+        timeoutMs
+      });
+      const reparsed = parseJsonLoose(retry.content);
+      if (reparsed.ok) {
+        response = retry;
+        parsed = reparsed;
+      }
+    }
+
     if (!parsed.ok || typeof parsed.data !== 'object' || parsed.data == null) {
-      throw new Error(parsed.ok ? 'judge returned non-object JSON' : parsed.error);
+      const snippet = response.content.replace(/\s+/g, ' ').slice(0, 300);
+      throw new Error(
+        `${parsed.ok ? 'judge returned non-object JSON' : parsed.error || 'unparseable judge output'} | raw: "${snippet}${response.content.length > 300 ? '…' : ''}" (${response.content.length} chars)`
+      );
     }
 
     const data = parsed.data as Record<string, unknown>;
