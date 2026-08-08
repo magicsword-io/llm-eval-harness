@@ -337,7 +337,7 @@ async function main(): Promise<void> {
       usage[args.judge].output_tokens += verdict.output_tokens;
       usage[args.judge].estimated_cost_usd += verdict.estimated_cost_usd;
       usage[args.judge].total_latency_ms += verdict.latency_ms;
-      console.log(verdict.best_model || 'judge failed');
+      console.log(verdict.best_model || `judge failed: ${verdict.best_reason.slice(0, 140)}`);
     }
 
     results.push(caseResult);

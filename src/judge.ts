@@ -95,7 +95,7 @@ ${candidateBlocks.join('\n\n')}`;
       system: JUDGE_SYSTEM,
       user,
       jsonMode: true,
-      maxTokens: 3000,
+      maxTokens: 8000,
       timeoutMs
     });
 
