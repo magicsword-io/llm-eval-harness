@@ -81,13 +81,28 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 async function loadCases(casesDir: string): Promise<EvalCase[]> {
-  const files = (await readdir(casesDir)).filter((file) => file.endsWith('.json')).sort();
-  const cases: EvalCase[] = [];
+  const files = (await readdir(casesDir)).filter((file) => file.endsWith('.json') && file !== 'prompts.json').sort();
 
+  let promptRegistry: Record<string, string> = {};
+  try {
+    promptRegistry = JSON.parse(await readFile(path.join(casesDir, 'prompts.json'), 'utf8')) as Record<string, string>;
+  } catch {
+    // no prompt registry in this cases directory — cases must inline `system`
+  }
+
+  const cases: EvalCase[] = [];
   for (const file of files) {
     const raw = await readFile(path.join(casesDir, file), 'utf8');
     const data = JSON.parse(raw) as EvalCase[] | EvalCase;
-    cases.push(...(Array.isArray(data) ? data : [data]));
+    for (const evalCase of Array.isArray(data) ? data : [data]) {
+      if (!evalCase.system && evalCase.system_prompt_key) {
+        const resolved = promptRegistry[evalCase.system_prompt_key];
+        if (!resolved) throw new Error(`${evalCase.id}: system_prompt_key "${evalCase.system_prompt_key}" not found in prompts.json`);
+        evalCase.system = resolved;
+      }
+      if (!evalCase.system) throw new Error(`${evalCase.id}: case has no system prompt (set "system" or "system_prompt_key")`);
+      cases.push(evalCase);
+    }
   }
 
   return cases;
@@ -110,7 +125,7 @@ async function runModel(model: string, evalCase: EvalCase, timeoutMs: number): P
   try {
     const result = await chat({
       model,
-      system: evalCase.system,
+      system: evalCase.system ?? '',
       user: evalCase.input,
       jsonMode,
       timeoutMs

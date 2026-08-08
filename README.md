@@ -129,6 +129,11 @@ Each case can define checks for objective requirements:
 - `array_max_length`
 - `max_chars`
 - `json_path_truthy`
+- `number_in_range`
+- `mitre_includes_any` / `mitre_includes_all` / `mitre_excludes`
+- `evidence_signal_any`
+- `no_invented_entries`
+- `rule_value_matches` / `rule_value_excludes` / `rule_action_count`
 
 These checks are cheap, repeatable, and should catch anything that does not require judgment.
 
