@@ -50,12 +50,32 @@ When `checks` are present, the runner enables OpenRouter JSON mode by default. I
 | `id` | Yes | Stable unique ID for the case. Use something easy to grep, such as `support-001-refund-request`. |
 | `category` | Yes | Workflow group, such as `support-triage`, `policy-review`, or `incident-summary`. |
 | `description` | Yes | Short human-readable description of what this case tests. |
-| `system` | Yes | System prompt sent to every candidate model. |
+| `system` | One of these | System prompt sent to every candidate model, inlined in the case. |
+| `system_prompt_key` | One of these | Key into a `prompts.json` file in the cases directory. Use this to share one prompt across many cases and update it in a single place. |
 | `input` | Yes | User message or task input sent to every candidate model. |
 | `checks` | Yes | Array of deterministic checks. Use `[]` for judge-only cases. |
 | `json_mode` | No | Overrides automatic JSON mode. Defaults to `true` when checks exist, otherwise `false`. |
 | `gold_notes` | No | Notes explaining the expected strong answer. Passed to the judge when `--judge` is used. |
 | `judge_rubric` | No | Case-specific guidance for the judge. |
+
+## Sharing Prompts with `prompts.json`
+
+If a cases directory contains a `prompts.json` file, it is loaded as a key-to-prompt registry:
+
+```json
+{
+  "TRIAGE_V2": "You are a triage assistant. Return only JSON ...",
+  "SUMMARIZER": "You write concise summaries. Return only JSON ..."
+}
+```
+
+Cases reference a prompt with `system_prompt_key` instead of inlining `system`:
+
+```json
+{ "id": "triage-001", "system_prompt_key": "TRIAGE_V2", "input": "...", "checks": [] }
+```
+
+This keeps product-specific prompts next to the cases that exercise them while the harness itself stays generic.
 
 ## How Checks Work
 
@@ -213,6 +233,66 @@ Passes when a path exists and is truthy.
 ```
 
 Use this for required fields where exact content is not important.
+
+### `number_in_range`
+
+Passes when a numeric path falls within `[min, max]`. Either bound is optional.
+
+```json
+{
+  "kind": "number_in_range",
+  "path": "confidence",
+  "min": 0.7,
+  "max": 1.0
+}
+```
+
+### `mitre_includes_any` / `mitre_includes_all` / `mitre_excludes`
+
+Array membership checks for MITRE ATT&CK technique IDs. Case-insensitive.
+
+```json
+{ "kind": "mitre_includes_any", "path": "mitre_techniques", "any_of": ["T1003", "T1003.001"] }
+{ "kind": "mitre_excludes", "path": "mitre_techniques", "excludes": ["T1036"] }
+```
+
+### `evidence_signal_any`
+
+Passes when any `signal` field in an array of evidence objects contains one of the given strings.
+
+```json
+{
+  "kind": "evidence_signal_any",
+  "path": "evidence_chain",
+  "contains_any": ["intel match", "unsigned"]
+}
+```
+
+### `no_invented_entries`
+
+Passes when every entry at the path appears in `allowed_entries` (case-insensitive). For string values, extracts filenames (`.exe`/`.dll`/`.sys`) and SHA256-looking tokens and verifies each is allowed.
+
+```json
+{
+  "kind": "no_invented_entries",
+  "path": "notable_entries",
+  "allowed_entries": ["certutil.exe", "mshta.exe"]
+}
+```
+
+Use this to catch hallucinated list items.
+
+### `rule_value_matches` / `rule_value_excludes` / `rule_action_count`
+
+Checks over a `{"rules": [{"action": "allow|deny", "name": "...", "value": "..."}]}` output shape, filtered by `action` (default `allow`).
+
+```json
+{ "kind": "rule_value_matches", "action": "allow", "contains_any": ["chrome.exe"] }
+{ "kind": "rule_value_excludes", "action": "allow", "excludes": ["C:\\*", "*.exe"] }
+{ "kind": "rule_action_count", "action": "deny", "min": 1, "max": 3 }
+```
+
+Use `rule_value_excludes` to reject overly broad rules.
 
 ## Judge-Only Cases
 

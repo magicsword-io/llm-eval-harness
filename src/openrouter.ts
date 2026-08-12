@@ -39,10 +39,18 @@ interface ModelsResponse {
 }
 
 export class ChatError extends Error {
-  constructor(message: string, public readonly latency_ms: number) {
+  constructor(
+    message: string,
+    public readonly latency_ms: number,
+    public readonly kind: 'data_policy' | 'timeout' | 'api' = 'api'
+  ) {
     super(message);
     this.name = 'ChatError';
   }
+}
+
+export function isDataPolicyBlock(text: string): boolean {
+  return text.includes('guardrail restrictions and data policy') || text.includes('data policy');
 }
 
 const FALLBACK_PRICING: Record<string, { input: number; output: number }> = {
@@ -97,6 +105,13 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
     const text = await response.text();
 
     if (!response.ok) {
+      if (isDataPolicyBlock(text)) {
+        throw new ChatError(
+          `BLOCKED by OpenRouter data policy: no endpoints for this model satisfy your account's Zero Data Retention / provider restrictions. Allow providers at https://openrouter.ai/settings/privacy or pick another model.`,
+          latency_ms,
+          'data_policy'
+        );
+      }
       throw new ChatError(`OpenRouter ${response.status} after ${(latency_ms / 1000).toFixed(1)}s: ${text.slice(0, 500)}`, latency_ms);
     }
 
@@ -111,7 +126,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
   } catch (error) {
     if (error instanceof ChatError) throw error;
     const latency_ms = Date.now() - start;
-    if (timedOut) throw new ChatError(`client timeout after ${(latency_ms / 1000).toFixed(1)}s`, latency_ms);
+    if (timedOut) throw new ChatError(`client timeout after ${(latency_ms / 1000).toFixed(1)}s`, latency_ms, 'timeout');
     throw new ChatError(`request error after ${(latency_ms / 1000).toFixed(1)}s: ${(error as Error).message}`, latency_ms);
   } finally {
     clearTimeout(timeout);
@@ -152,6 +167,10 @@ export async function loadLivePricing(): Promise<{ count: number; error?: string
     livePricing = new Map();
     return { count: 0, error: (error as Error).message };
   }
+}
+
+export function getLiveModelIds(): Set<string> | null {
+  return livePricing && livePricing.size > 0 ? new Set(livePricing.keys()) : null;
 }
 
 export function getModelPricing(model: string): { input: number; output: number; source: 'live' | 'fallback' } | null {

@@ -3,7 +3,7 @@
 import 'dotenv/config';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { chat, ChatError, estimateCost, getModelPricing, loadLivePricing, parseJsonLoose } from './openrouter.js';
+import { chat, ChatError, estimateCost, getLiveModelIds, getModelPricing, loadLivePricing, parseJsonLoose } from './openrouter.js';
 import { judgeCase } from './judge.js';
 import { getRecommendation, renderMarkdown } from './report.js';
 import { scoreCase } from './score.js';
@@ -19,6 +19,7 @@ interface CliArgs {
   timeoutMs: number;
   judgeTimeoutMs: number;
   sequential: boolean;
+  skipPreflight: boolean;
   out: string;
   json?: string;
 }
@@ -37,6 +38,7 @@ Options:
   --timeout-seconds <n>        Candidate timeout. Default: 60.
   --judge-timeout-seconds <n>  Judge timeout. Default: 120.
   --sequential                 Run candidate models one at a time.
+  --skip-preflight             Skip the model availability check before the run.
   --out <path>                 Markdown report path. Default: reports/report.md
   --json <path>                Optional raw JSON report path.
 `);
@@ -50,6 +52,7 @@ function parseArgs(argv: string[]): CliArgs {
     timeoutMs: 60_000,
     judgeTimeoutMs: 120_000,
     sequential: false,
+    skipPreflight: false,
     out: 'reports/report.md'
   };
 
@@ -70,6 +73,7 @@ function parseArgs(argv: string[]): CliArgs {
     else if (arg === '--timeout-seconds') args.timeoutMs = Number(next()) * 1000;
     else if (arg === '--judge-timeout-seconds') args.judgeTimeoutMs = Number(next()) * 1000;
     else if (arg === '--sequential') args.sequential = true;
+    else if (arg === '--skip-preflight') args.skipPreflight = true;
     else if (arg === '--out') args.out = next();
     else if (arg === '--json') args.json = next();
     else if (arg === '--help' || arg === '-h') usage();
@@ -81,26 +85,85 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 async function loadCases(casesDir: string): Promise<EvalCase[]> {
-  const files = (await readdir(casesDir)).filter((file) => file.endsWith('.json')).sort();
-  const cases: EvalCase[] = [];
+  const files = (await readdir(casesDir)).filter((file) => file.endsWith('.json') && file !== 'prompts.json').sort();
 
+  let promptRegistry: Record<string, string> = {};
+  try {
+    promptRegistry = JSON.parse(await readFile(path.join(casesDir, 'prompts.json'), 'utf8')) as Record<string, string>;
+  } catch {
+    // no prompt registry in this cases directory — cases must inline `system`
+  }
+
+  const cases: EvalCase[] = [];
   for (const file of files) {
     const raw = await readFile(path.join(casesDir, file), 'utf8');
     const data = JSON.parse(raw) as EvalCase[] | EvalCase;
-    cases.push(...(Array.isArray(data) ? data : [data]));
+    for (const evalCase of Array.isArray(data) ? data : [data]) {
+      if (!evalCase.system && evalCase.system_prompt_key) {
+        const resolved = promptRegistry[evalCase.system_prompt_key];
+        if (!resolved) throw new Error(`${evalCase.id}: system_prompt_key "${evalCase.system_prompt_key}" not found in prompts.json`);
+        evalCase.system = resolved;
+      }
+      if (!evalCase.system) throw new Error(`${evalCase.id}: case has no system prompt (set "system" or "system_prompt_key")`);
+      cases.push(evalCase);
+    }
   }
 
   return cases;
 }
 
-function emptyUsage(): ModelUsage {
-  return {
+async function preflight(models: string[]): Promise<void> {
+  const catalog = getLiveModelIds();
+  if (catalog) {
+    const unknown = models.filter((model) => !catalog.has(model));
+    if (unknown.length > 0) {
+      console.error(`\n[preflight] unknown model id(s) — not in the live OpenRouter catalog:`);
+      for (const model of unknown) console.error(`  - ${model}`);
+      console.error(`Fix the id or rerun with --skip-preflight.`);
+      process.exit(1);
+    }
+  }
+
+  process.stdout.write(`[preflight] probing ${models.length} model(s)... `);
+  const probes = await Promise.all(
+    models.map(async (model) => {
+      try {
+        await chat({ model, system: 'Reply with the word ok.', user: 'ping', maxTokens: 1, timeoutMs: 20_000 });
+        return { model, error: null as string | null, kind: null as string | null };
+      } catch (error) {
+        return {
+          model,
+          error: (error as Error).message,
+          kind: error instanceof ChatError ? error.kind : 'api'
+        };
+      }
+    })
+  );
+
+  const failed = probes.filter((probe) => probe.error);
+  if (failed.length === 0) {
+    console.log('all reachable');
+    return;
+  }
+
+  console.log('failed\n');
+  for (const probe of failed) console.error(`  - ${probe.model}: ${probe.error}`);
+  if (failed.some((probe) => probe.kind === 'data_policy')) {
+    console.error(`\nSome failures are OpenRouter data-policy blocks, not bad models.`);
+    console.error(`Allow those providers at https://openrouter.ai/settings/privacy and retry.`);
+  }
+  console.error(`\nFix the failing model(s), drop them, or rerun with --skip-preflight.`);
+  process.exit(1);
+}
+
+function emptyUsage(): ModelUsage {  return {
     input_tokens: 0,
     output_tokens: 0,
     estimated_cost_usd: 0,
     total_latency_ms: 0,
     parse_failures: 0,
-    api_errors: 0
+    api_errors: 0,
+    data_policy_blocks: 0
   };
 }
 
@@ -110,7 +173,7 @@ async function runModel(model: string, evalCase: EvalCase, timeoutMs: number): P
   try {
     const result = await chat({
       model,
-      system: evalCase.system,
+      system: evalCase.system ?? '',
       user: evalCase.input,
       jsonMode,
       timeoutMs
@@ -141,7 +204,8 @@ async function runModel(model: string, evalCase: EvalCase, timeoutMs: number): P
       input_tokens: 0,
       output_tokens: 0,
       estimated_cost_usd: 0,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
+      error_kind: error instanceof ChatError ? error.kind : 'api'
     };
   }
 }
@@ -151,8 +215,10 @@ function applyUsage(usage: ModelUsage, output: ModelOutput): void {
   usage.output_tokens += output.output_tokens;
   usage.estimated_cost_usd += output.estimated_cost_usd;
   usage.total_latency_ms += output.latency_ms;
-  if (output.error) usage.api_errors += 1;
-  else if (!output.parse_ok) usage.parse_failures += 1;
+  if (output.error) {
+    usage.api_errors += 1;
+    if (output.error_kind === 'data_policy') usage.data_policy_blocks += 1;
+  } else if (!output.parse_ok) usage.parse_failures += 1;
 }
 
 function aggregateJudge(report: RunReport): void {
@@ -225,6 +291,10 @@ async function main(): Promise<void> {
   console.log(`Running ${cases.length} cases x ${args.models.length} models${args.judge ? ` with judge ${args.judge}` : ''}`);
   console.log(`Planned API calls: ${candidateCalls} candidates + ${judgeCalls} judge = ${candidateCalls + judgeCalls}`);
 
+  if (!args.skipPreflight) {
+    await preflight([...args.models, ...(args.judge ? [args.judge] : [])]);
+  }
+
   const startedAt = new Date().toISOString();
   const usage: Record<string, ModelUsage> = Object.fromEntries(args.models.map((model) => [model, emptyUsage()]));
   if (args.judge) usage[args.judge] = emptyUsage();
@@ -267,7 +337,7 @@ async function main(): Promise<void> {
       usage[args.judge].output_tokens += verdict.output_tokens;
       usage[args.judge].estimated_cost_usd += verdict.estimated_cost_usd;
       usage[args.judge].total_latency_ms += verdict.latency_ms;
-      console.log(verdict.best_model || 'judge failed');
+      console.log(verdict.best_model || `judge failed: ${verdict.best_reason.slice(0, 140)}`);
     }
 
     results.push(caseResult);
@@ -285,6 +355,13 @@ async function main(): Promise<void> {
   };
 
   aggregateJudge(report);
+
+  const policyBlocked = args.models.filter((model) => (usage[model]?.data_policy_blocks ?? 0) > 0);
+  if (policyBlocked.length > 0) {
+    console.log(`\nWARNING: ${policyBlocked.length} model(s) had requests blocked by your OpenRouter data policy:`);
+    for (const model of policyBlocked) console.log(`  - ${model} (${usage[model].data_policy_blocks} blocked)`);
+    console.log(`Their scores are not meaningful. Allow providers at https://openrouter.ai/settings/privacy and rerun.`);
+  }
 
   const recommendation = getRecommendation(report);
   if (recommendation) {

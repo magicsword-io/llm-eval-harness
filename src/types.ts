@@ -37,14 +37,16 @@ export type Check =
   | {
       kind: 'array_min_length';
       path: string;
-      min: number;
+      min?: number;
+      limit?: number;
       weight?: number;
       note?: string;
     }
   | {
       kind: 'array_max_length';
       path: string;
-      max: number;
+      max?: number;
+      limit?: number;
       weight?: number;
       note?: string;
     }
@@ -60,13 +62,81 @@ export type Check =
       path: string;
       weight?: number;
       note?: string;
+    }
+  | {
+      kind: 'number_in_range';
+      path: string;
+      min?: number;
+      max?: number;
+      weight?: number;
+      note?: string;
+    }
+  | {
+      kind: 'mitre_includes_any';
+      path: string;
+      any_of: string[];
+      weight?: number;
+      note?: string;
+    }
+  | {
+      kind: 'mitre_includes_all';
+      path: string;
+      all_of: string[];
+      weight?: number;
+      note?: string;
+    }
+  | {
+      kind: 'mitre_excludes';
+      path: string;
+      excludes: string[];
+      weight?: number;
+      note?: string;
+    }
+  | {
+      kind: 'evidence_signal_any';
+      path: string;
+      contains_any: string[];
+      weight?: number;
+      note?: string;
+    }
+  | {
+      kind: 'no_invented_entries';
+      path: string;
+      allowed_entries: string[];
+      weight?: number;
+      note?: string;
+    }
+  | {
+      kind: 'rule_value_matches';
+      action?: 'allow' | 'deny';
+      contains_any: string[];
+      weight?: number;
+      note?: string;
+    }
+  | {
+      kind: 'rule_value_excludes';
+      action?: 'allow' | 'deny';
+      excludes: string[];
+      weight?: number;
+      note?: string;
+    }
+  | {
+      kind: 'rule_action_count';
+      action?: 'allow' | 'deny';
+      min?: number;
+      max?: number;
+      weight?: number;
+      note?: string;
     };
 
 export interface EvalCase {
   id: string;
   category: string;
   description: string;
-  system: string;
+  /** Inline system prompt. Either this or system_prompt_key is required. */
+  system?: string;
+  /** Key into prompts.json in the cases directory. Resolved at load time. */
+  system_prompt_key?: string;
   input: string;
   json_mode?: boolean;
   checks: Check[];
@@ -85,6 +155,7 @@ export interface ModelOutput {
   output_tokens: number;
   estimated_cost_usd: number;
   error?: string;
+  error_kind?: 'data_policy' | 'timeout' | 'api';
 }
 
 export interface DeterministicScore {
@@ -134,6 +205,7 @@ export interface ModelUsage {
   total_latency_ms: number;
   parse_failures: number;
   api_errors: number;
+  data_policy_blocks: number;
 }
 
 export interface RunReport {

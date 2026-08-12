@@ -117,11 +117,18 @@ export function renderMarkdown(report: RunReport): string {
     const judgeAvg = report.judge_per_model_avg?.[model];
     const wins = report.judge_wins?.[model] ?? 0;
     lines.push(
-      `| \`${model}\` | ${pct(deterministicOverall(report, model))} | ${judgeAvg ? `${rating(judgeAvg.accuracy)}/10` : '-'} | ${judgeAvg ? `${rating(judgeAvg.overall)}/10` : '-'} | ${wins} | ${money(usage.estimated_cost_usd)} | ${money(costPerCase(report, model))} | ${avgLatency(report, model).toFixed(0)}ms | ${usage.parse_failures} | ${usage.api_errors} |`
+      `| \`${model}\` | ${pct(deterministicOverall(report, model))} | ${judgeAvg ? `${rating(judgeAvg.accuracy)}/10` : '-'} | ${judgeAvg ? `${rating(judgeAvg.overall)}/10` : '-'} | ${wins} | ${money(usage.estimated_cost_usd)} | ${money(costPerCase(report, model))} | ${avgLatency(report, model).toFixed(0)}ms | ${usage.parse_failures} | ${usage.api_errors}${usage.data_policy_blocks > 0 ? ` (${usage.data_policy_blocks} policy)` : ''} |`
     );
   }
 
   lines.push('');
+
+  const policyBlocked = report.models.filter((model) => (report.per_model_usage[model]?.data_policy_blocks ?? 0) > 0);
+  if (policyBlocked.length > 0) {
+    lines.push('> **Data-policy blocks:** ' + policyBlocked.map((model) => `\`${model}\``).join(', ') +
+      ' had requests rejected by the OpenRouter account data policy (no ZDR-compliant endpoints). Their scores are not meaningful — adjust https://openrouter.ai/settings/privacy and rerun.');
+    lines.push('');
+  }
 
   if (recommendation) {
     lines.push('## Priority Ranking');
